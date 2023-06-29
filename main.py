@@ -1,7 +1,7 @@
 from TwitchPlays import *
 from dotenv import load_dotenv
 import os
-from pywitch import PyWitchHeat, run_forever
+from pywitch import PyWitchHeat
 import threading
 import pydirectinput
 from global_hotkeys import *
@@ -9,6 +9,7 @@ from global_hotkeys import *
 
 click_cooldown = 1
 channel = "thepiledriver"
+heat_map = True
 
 load_dotenv()
 user_dict = dict()
@@ -19,10 +20,12 @@ def callback(data):
             return
     user_dict[data["user_id"]] = data["event_time"]
     x, y = int(data["x"]*1920), int(data["y"]*1080)
+    print(x, y)
     pydirectinput.mouseDown(x, y, button="left")
     pydirectinput.mouseUp(x, y, button="left")
 
-heat = PyWitchHeat(channel, os.getenv("ACCESS_TOKEN"), callback)
+if heat_map:
+    heat = PyWitchHeat(channel, os.getenv("ACCESS_TOKEN"), callback)
 bot = Bot(os.getenv("TWITCH_TOKEN"), "!", [channel])
 bot.keys = {
             "w": [("w", 1000)],
@@ -67,21 +70,21 @@ async def main():
         "actuate_on_partial_release": False
     }]
     thread1 = threading.Thread(target=bot.run)
-    thread2 = threading.Thread(target=heat.start)
     # thread3 = threading.Thread(target=run_forever)
     thread1.start()
-    thread2.start()
+    if heat_map:
+        thread2 = threading.Thread(target=heat.start)
+        thread2.start()
     loop = asyncio.get_event_loop()
     register_hotkeys(bindings)
     start_checking_hotkeys()
     # thread3.start()
     thread1.join()
-    thread2.join()
+    if heat_map:
+        thread2.join()
     # thread3.join()
     loop.stop()
     
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# TODO: toggle heat map
