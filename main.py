@@ -9,7 +9,10 @@ from global_hotkeys import *
 
 click_cooldown = 1
 channel = "thepiledriver"
-heat_map = True
+heat_map = False
+command_chance = 1.0
+command_cooldown = 5
+
 
 load_dotenv()
 user_dict = dict()
@@ -35,7 +38,7 @@ bot.keys = {
             "jump": [("space", 100)],
             "hover": [("space", 1000)]
         }
-'''bot.mouse = {
+bot.mouse = {
             "left": [((-10, 0), 0)],
             "right": [((10, 0), 0)],
             "up": [((0, -10), 0)],
@@ -44,7 +47,9 @@ bot.keys = {
             "rc": [((0, 0), 2)], # right click
             "mm": [((0, 0), 3)], # middle mouse button
             "lu": [((-100, 0), 1), ((0,-100), 2)], # left up, mouse 1 and 2
-}'''
+}
+bot.chance = command_chance
+bot.cooldown = command_cooldown
 # bot.cmd["!help"] = help_cmd
 
 @bot.command(name="help")

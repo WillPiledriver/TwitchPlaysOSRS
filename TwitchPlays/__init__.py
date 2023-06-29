@@ -1,6 +1,8 @@
 from twitchio.ext import commands
 import pydirectinput
 import asyncio
+import random
+import time
 
 class Bot(commands.Bot):
     def __init__(self, token, prefix="!", channels=[]):
@@ -9,6 +11,9 @@ class Bot(commands.Bot):
         self.cmds = dict()
         self.keys = dict()
         self.mouse = dict()
+        self.user_dict = dict()
+        self.chance = 1.0
+        self.cooldown = 0
 
     async def event_ready(self):
         # We are logged in and ready to chat and use commands...
@@ -18,13 +23,52 @@ class Bot(commands.Bot):
         if ctx.echo:
             return
         command = ctx.content.lower()
+        
         if command in self.mouse:
+            if ctx.author.id not in self.user_dict:
+                self.user_dict[ctx.author.id] = time.time()
+                if random.random() > self.chance:
+                    return
+                await self.task_mouse(self.mouse[command], ctx)
+                return
+            if self.user_dict[ctx.author.id] + self.cooldown > time.time():
+                return
+            else:
+                self.user_dict[ctx.author.id] = time.time()
+            if random.random() > self.chance:
+                return
             await self.task_mouse(self.mouse[command], ctx)
             return
+        
         if command in self.keys:
+            if ctx.author.id not in self.user_dict:
+                self.user_dict[ctx.author.id] = time.time()
+                if random.random() > self.chance:
+                    return
+                await self.task_keys(self.keys[command], ctx)
+                return
+            if self.user_dict[ctx.author.id] + self.cooldown > time.time():
+                return
+            else:
+                self.user_dict[ctx.author.id] = time.time()
+            if random.random() > self.chance:
+                return
             await self.task_keys(self.keys[command], ctx)
             return
+        
         if command in self.cmds:
+            if ctx.author.id not in self.user_dict:
+                self.user_dict[ctx.author.id] = time.time()
+                if random.random() > self.chance:
+                    return
+                await self.cmds[command](ctx)
+                return
+            if self.user_dict[ctx.author.id] + self.cooldown > time.time():
+                return
+            else:
+                self.user_dict[ctx.author.id] = time.time()
+            if random.random() > self.chance:
+                return
             await self.cmds[command](ctx)
             return
         await self.handle_commands(ctx)
