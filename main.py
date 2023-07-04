@@ -1,29 +1,98 @@
 from TwitchPlays import *
 from dotenv import load_dotenv
 import os
-from pywitch import PyWitchHeat
 import threading
-import pydirectinput
 from global_hotkeys import *
 import numpy as np
 from sklearn.cluster import DBSCAN
+import subprocess
+import socketio
+import asyncio
+
+
+sio = socketio.AsyncClient()
+
 
 # Set the LOKY_MAX_CPU_COUNT environment variable
 os.environ['LOKY_MAX_CPU_COUNT'] = '4'
 
+# TODO: Build twitch extension to handle right clicks
 
-
-click_cooldown = 0
+click_cooldown = 2.5
 channel = "thepiledriver"
 heat_map = True
 command_chance = 1.0
 command_cooldown = 0
+channel_id = "23728793"
 
 
 load_dotenv()
 user_dict = dict()
 x_coordinates = np.array([])
 y_coordinates = np.array([])
+
+@sio.event
+async def connect():
+    print("I'm connected!")
+    await sio.emit("init", channel_id)
+
+@sio.event
+async def message(data):
+    print('Received message:', data)
+
+@sio.event
+async def leftClick(data):
+    global x_coordinates, y_coordinates, user_dict
+    size_x, size_y = pydirectinput.size()
+    if data["user_id"] in user_dict:
+        if user_dict[data["user_id"]]["time"] + click_cooldown > data["event_time"]:
+            return
+    
+    x, y = int(data["x"] * size_x), int(data["y"] * size_y)
+    user_dict[data["user_id"]] = {
+        "time": data["event_time"],
+        "button": "left",
+        "coords": (x, y)
+    }
+
+    print(x, y)
+    print(data)
+
+@sio.event
+async def rightClick(data):
+    global x_coordinates, y_coordinates, user_dict
+    size_x, size_y = pydirectinput.size()
+    if data["user_id"] in user_dict:
+        if user_dict[data["user_id"]]["time"] + click_cooldown > data["event_time"]:
+            return
+    
+    x, y = int(data["x"] * size_x), int(data["y"] * size_y)
+    user_dict[data["user_id"]] = {
+        "time": data["event_time"],
+        "button": "right",
+        "coords": (x, y)
+    }
+
+    print(x, y)
+    print(data)
+
+@sio.event
+async def init(data):
+    if data == channel_id:
+        print(channel_id)
+        print("Good to go")
+
+@sio.event
+async def connect_error(data):
+    print("The connection failed!")
+
+@sio.event
+async def disconnect():
+    print("I'm disconnected!")
+
+async def run_socketio():
+    await sio.connect("https://willpile.com:8080")
+    await sio.wait()
 
 def callback(data):
     global x_coordinates, y_coordinates, user_dict
@@ -45,7 +114,7 @@ def callback(data):
     # pydirectinput.mouseUp(x, y, button="left")
 
 def mouse_loop():
-    global x_coordinates, y_coordinates, user_dict
+    global x_coordinates, y_coordinates, user_dict, hc
     while True:
         if len(user_dict) == 0:
             print("nothing clicked")
@@ -73,16 +142,30 @@ def mouse_loop():
         most_populated_cluster = coordinates[labels == most_populated_cluster_label]
         center = np.mean(most_populated_cluster, axis=0)
 
-        x, y = [round(center[0]), round(center[1])]
+        # TODO: Count the clicks based on coordinates
+
+        click_counts = {
+            "left": 0,
+            "right": 0
+        }
+
+        for user_data in user_dict.values():
+            button = user_data["button"]
+            if button in click_counts:
+                click_counts[button] += 1
+
+        most_clicked_key = max(click_counts, key=click_counts.get)
+
+        x, y = (round(center[0]), round(center[1]))
         print("Center coordinates:", x, y)
-        pydirectinput.mouseDown(x, y, button="left")
+        r = random.uniform(0.5, 1.7)
+        subprocess.call(["python", "human_mouse.py", str(x), str(y), str(r), most_clicked_key])
         time.sleep(0.15)
-        pydirectinput.mouseUp(x, y, button="left")
         user_dict = dict()
         time.sleep(5)
 
-if heat_map:
-    heat = PyWitchHeat(channel, os.getenv("ACCESS_TOKEN"), callback)
+# if heat_map:
+    # heat = PyWitchHeat(channel, os.getenv("ACCESS_TOKEN"), callback)
 bot = Bot(os.getenv("TWITCH_TOKEN"), "!", [channel])
 bot.keys = {
             "w": [("w", 1000)],
@@ -131,6 +214,9 @@ async def kill_script():
 def on_hotkey_press():
     asyncio.run(kill_script())
 
+def run_s():
+    asyncio.run(run_socketio())
+
 async def main():
     bindings = [{
         "hotkey": "control + down",
@@ -142,19 +228,19 @@ async def main():
     # thread3 = threading.Thread(target=run_forever)
     thread1.start()
     if heat_map:
-        thread2 = threading.Thread(target=heat.start)
+        """thread2 = threading.Thread(target=heat.start)
+        thread2.start()"""
+        thread2 = threading.Thread(target=run_s)
         thread2.start()
         thread3 = threading.Thread(target=mouse_loop)
         thread3.start()
     loop = asyncio.get_event_loop()
     register_hotkeys(bindings)
     start_checking_hotkeys()
-    # thread3.start()
     thread1.join()
     if heat_map:
         thread2.join()
         thread3.join()
-    # thread3.join()
     loop.stop()
     
 
