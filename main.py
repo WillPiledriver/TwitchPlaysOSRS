@@ -8,6 +8,7 @@ from sklearn.cluster import DBSCAN
 import subprocess
 import socketio
 import asyncio
+import cv2
 
 
 sio = socketio.AsyncClient()
@@ -16,18 +17,19 @@ sio = socketio.AsyncClient()
 # Set the LOKY_MAX_CPU_COUNT environment variable
 os.environ['LOKY_MAX_CPU_COUNT'] = '4'
 
-# TODO: Build twitch extension to handle right clicks
 
+image_path = "open_1920.png"
 click_cooldown = 2.5
 channel = "thepiledriver"
 heat_map = True
 command_chance = 1.0
-command_cooldown = 0
+command_cooldown = 2.5
 channel_id = "23728793"
 
 
 load_dotenv()
 user_dict = dict()
+auth_list = list()
 x_coordinates = np.array([])
 y_coordinates = np.array([])
 
@@ -44,37 +46,33 @@ async def message(data):
 async def leftClick(data):
     global x_coordinates, y_coordinates, user_dict
     size_x, size_y = pydirectinput.size()
-    if data["user_id"] in user_dict:
-        if user_dict[data["user_id"]]["time"] + click_cooldown > data["event_time"]:
+    if data["opaque_id"] in user_dict:
+        if user_dict[data["opaque_id"]]["time"] + click_cooldown > data["event_time"]:
             return
     
     x, y = int(data["x"] * size_x), int(data["y"] * size_y)
-    user_dict[data["user_id"]] = {
-        "time": data["event_time"],
-        "button": "left",
-        "coords": (x, y)
-    }
-
-    print(x, y)
-    print(data)
+    if not mask[y, x].any():
+        user_dict[data["opaque_id"]] = {
+            "time": data["event_time"],
+            "button": "left",
+            "coords": (x, y)
+        }
 
 @sio.event
 async def rightClick(data):
     global x_coordinates, y_coordinates, user_dict
     size_x, size_y = pydirectinput.size()
-    if data["user_id"] in user_dict:
-        if user_dict[data["user_id"]]["time"] + click_cooldown > data["event_time"]:
+    if data["opaque_id"] in user_dict:
+        if user_dict[data["opaque_id"]]["time"] + click_cooldown > data["event_time"]:
             return
     
     x, y = int(data["x"] * size_x), int(data["y"] * size_y)
-    user_dict[data["user_id"]] = {
-        "time": data["event_time"],
-        "button": "right",
-        "coords": (x, y)
-    }
-
-    print(x, y)
-    print(data)
+    if not mask[y, x].any():
+        user_dict[data["opaque_id"]] = {
+            "time": data["event_time"],
+            "button": "right",
+            "coords": (x, y)
+        }
 
 @sio.event
 async def init(data):
@@ -97,28 +95,21 @@ async def run_socketio():
 def callback(data):
     global x_coordinates, y_coordinates, user_dict
     size_x, size_y = pydirectinput.size()
-    if data["user_id"] in user_dict:
-        if user_dict[data["user_id"]]["time"] + click_cooldown > data["event_time"]:
+    if data["opaque_id"] in user_dict:
+        if user_dict[data["opaque_id"]]["time"] + click_cooldown > data["event_time"]:
             return
     
     x, y = int(data["x"] * size_x), int(data["y"] * size_y)
-    user_dict[data["user_id"]] = {
+    user_dict[data["opaque_id"]] = {
         "time": data["event_time"],
         "coords": (x, y)
     }
-
-    print(x, y)
-    # x_coordinates = np.append(x_coordinates, x)
-    # y_coordinates = np.append(y_coordinates, y)
-    # pydirectinput.mouseDown(x, y, button="left")
-    # pydirectinput.mouseUp(x, y, button="left")
 
 def mouse_loop():
     global x_coordinates, y_coordinates, user_dict, hc
     while True:
         if len(user_dict) == 0:
-            print("nothing clicked")
-            time.sleep(5)
+            time.sleep(click_cooldown)
             continue
         
         x_coordinates = np.array([data["coords"][0] for user, data in user_dict.items()])
@@ -142,31 +133,69 @@ def mouse_loop():
         most_populated_cluster = coordinates[labels == most_populated_cluster_label]
         center = np.mean(most_populated_cluster, axis=0)
 
-        # TODO: Count the clicks based on coordinates
-
+        # Count the clicks of the most populated cluster
         click_counts = {
             "left": 0,
             "right": 0
         }
-
-        for user_data in user_dict.values():
-            button = user_data["button"]
-            if button in click_counts:
-                click_counts[button] += 1
-
+        for i, (user, data) in enumerate(user_dict.items()):
+            if labels[i] == most_populated_cluster_label:
+                button = data["button"]
+                if button in click_counts:
+                    click_counts[button] += 1
         most_clicked_key = max(click_counts, key=click_counts.get)
 
+        # Human-like mouse movement and click
         x, y = (round(center[0]), round(center[1]))
         print("Center coordinates:", x, y)
-        r = random.uniform(0.5, 1.7)
+        if mask[y, x].any():
+            return
+        r = random.uniform(0.5, 1.25)
         subprocess.call(["python", "human_mouse.py", str(x), str(y), str(r), most_clicked_key])
-        time.sleep(0.15)
+        time.sleep(random.uniform(0.2, 0.7))
         user_dict = dict()
-        time.sleep(5)
+        time.sleep(click_cooldown)
+
+# Load the PNG image
+image = cv2.imread(image_path)
+
+# Convert the image to grayscale
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+# Threshold the grayscale image
+_, threshold = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY_INV)
+
+# Find contours of the black regions
+contours, _ = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+# Create a mask for black regions
+mask = np.zeros_like(image)
+
+# Draw contours on the mask
+cv2.drawContours(mask, contours, -1, (255, 255, 255), thickness=cv2.FILLED)
+
 
 # if heat_map:
     # heat = PyWitchHeat(channel, os.getenv("ACCESS_TOKEN"), callback)
 bot = Bot(os.getenv("TWITCH_TOKEN"), "!", [channel])
+"""
+monkey island
+bot.keys = {
+    "open": [("o", 250)],
+    "pick": [("p", 250)],
+    "push": [("s", 250)],
+    "pull": [("y", 250)],
+    "close": [("c", 250)],
+    "look": [("l", 250)],
+    "talk": [("t", 250)],
+    "give": [("g", 250)],
+    "use": [("u", 250)],
+    "inv": [("i", 250)],
+    "hint": [("h", 250)],
+    "hotswap": [("f10", 250)]
+}
+
+noita
 bot.keys = {
             "w": [("w", 1000)],
             "d": [("d", 1000)],
@@ -184,7 +213,7 @@ bot.keys = {
             "6": {("6", 100)},
             "7": {("7", 100)},
             "8": {("8", 100)},
-        }
+        }"""
 '''bot.mouse = {
             "left": [((-10, 0), 0)],
             "right": [((10, 0), 0)],
@@ -202,7 +231,7 @@ bot.cooldown = command_cooldown
 @bot.command(name="help")
 async def help_cmd(ctx: commands.Context):
     cmds = [f"!{cmd}" for cmd in list(bot.commands.keys())] + list(bot.cmds.keys()) + list(bot.keys.keys()) + list(bot.mouse.keys())
-    response = f"@{ctx.author.name}: {', '.join(cmds)}."
+    response = f"Commands: {', '.join(cmds)}."
     await ctx.reply(response)
 
 async def kill_script():
