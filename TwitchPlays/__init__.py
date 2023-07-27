@@ -82,6 +82,7 @@ class Bot(commands.Bot):
             pydirectinput.mouseUp(button=buttons[click])
 
     async def send_input(self, inp, ms):
+        print(inp, ms)
         if not isinstance(ms, bool):
             pydirectinput.keyDown(inp)
             await asyncio.sleep(ms/1000)
@@ -98,12 +99,10 @@ class Bot(commands.Bot):
         await asyncio.gather(*tasks)
 
     async def task_keys(self, keys, ctx: commands.Context):
-        tasks = []
-        for key in keys:
-            tasks.append(self.send_input(key[0], key[1]))
+        tasks = [self.send_input(key[0], key[1]() if callable(key[1]) else key[1]) for key in keys]
         await asyncio.gather(*tasks)
 
     @commands.command()
     async def hello(self, ctx: commands.Context):
         # Send a hello back!
-        await ctx.send(f'Hello {ctx.author.name}!')
+        await ctx.reply(f'Hello {ctx.author.name}!')
