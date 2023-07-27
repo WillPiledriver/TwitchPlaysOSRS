@@ -1,4 +1,5 @@
 from TwitchPlays import *
+from RunelitePlugin import RunelitePlugin as rp
 from dotenv import load_dotenv
 import os
 import threading
@@ -9,8 +10,12 @@ import subprocess
 import socketio
 import asyncio
 import cv2
+import json
+import pygetwindow as gw
+import math
 
-
+runelite_ws_url = "ws://localhost:8085"
+runelite_ws = rp(runelite_ws_url)
 sio = socketio.AsyncClient()
 
 
@@ -23,7 +28,7 @@ click_cooldown = 2.5
 channel = "thepiledriver"
 heat_map = True
 command_chance = 1.0
-command_cooldown = 2.5
+command_cooldown = 5
 channel_id = "23728793"
 
 
@@ -32,6 +37,13 @@ user_dict = dict()
 auth_list = list()
 x_coordinates = np.array([])
 y_coordinates = np.array([])
+
+window_y_offset = 23
+def get_window(partial_title):
+    for window in gw.getWindowsWithTitle(partial_title):
+        if partial_title.lower() in window.title.lower():
+            return window
+    return None
 
 @sio.event
 async def connect():
@@ -46,9 +58,9 @@ async def message(data):
 async def leftClick(data):
     global x_coordinates, y_coordinates, user_dict
     size_x, size_y = pydirectinput.size()
-    if data["opaque_id"] in user_dict:
+    '''if data["opaque_id"] in user_dict:
         if user_dict[data["opaque_id"]]["time"] + click_cooldown > data["event_time"]:
-            return
+            return'''
     
     x, y = int(data["x"] * size_x), int(data["y"] * size_y)
     if not mask[y, x].any():
@@ -62,9 +74,9 @@ async def leftClick(data):
 async def rightClick(data):
     global x_coordinates, y_coordinates, user_dict
     size_x, size_y = pydirectinput.size()
-    if data["opaque_id"] in user_dict:
+    '''if data["opaque_id"] in user_dict:
         if user_dict[data["opaque_id"]]["time"] + click_cooldown > data["event_time"]:
-            return
+            return'''
     
     x, y = int(data["x"] * size_x), int(data["y"] * size_y)
     if not mask[y, x].any():
@@ -106,10 +118,10 @@ def callback(data):
     }
 
 def mouse_loop():
-    global x_coordinates, y_coordinates, user_dict, hc
+    global x_coordinates, y_coordinates, user_dict
     while True:
+        time.sleep(click_cooldown)
         if len(user_dict) == 0:
-            time.sleep(click_cooldown)
             continue
         
         x_coordinates = np.array([data["coords"][0] for user, data in user_dict.items()])
@@ -151,9 +163,9 @@ def mouse_loop():
         if mask[y, x].any():
             return
         r = random.uniform(0.5, 1.25)
+        user_dict = dict()
         subprocess.call(["python", "human_mouse.py", str(x), str(y), str(r), most_clicked_key])
         time.sleep(random.uniform(0.2, 0.7))
-        user_dict = dict()
         time.sleep(click_cooldown)
 
 # Load the PNG image
@@ -178,8 +190,15 @@ cv2.drawContours(mask, contours, -1, (255, 255, 255), thickness=cv2.FILLED)
 # if heat_map:
     # heat = PyWitchHeat(channel, os.getenv("ACCESS_TOKEN"), callback)
 bot = Bot(os.getenv("TWITCH_TOKEN"), "!", [channel])
+
+bot.keys = {
+    "l": [("left", lambda: random.randint(750, 1000))],
+    "r": [("right", lambda: random.randint(750, 1000))],
+    "u": [("up", lambda: random.randint(200, 350))],
+    "d": [("down", lambda: random.randint(200, 350))]
+}
+
 """
-monkey island
 bot.keys = {
     "open": [("o", 250)],
     "pick": [("p", 250)],
@@ -228,16 +247,59 @@ bot.chance = command_chance
 bot.cooldown = command_cooldown
 # bot.cmd["!help"] = help_cmd
 
+def clicky(x, y, button="left", steady=False):
+    window = get_window("runelite")
+    offsets = window.topleft
+    pos = pydirectinput.position()
+    distance = math.sqrt((x - pos[0])**2 + (y - pos[1])**2)
+    fraction = distance / 1100
+    r = max(random.uniform(0.5, 1) * fraction, random.uniform(0.05, 0.17))
+    subprocess.call(["python", "human_mouse.py", str(int(x) + offsets[0]), str(int(y) + offsets[1] + window_y_offset), str(r), button, str(int(steady))])
+
+
 @bot.command(name="help")
 async def help_cmd(ctx: commands.Context):
     cmds = [f"!{cmd}" for cmd in list(bot.commands.keys())] + list(bot.cmds.keys()) + list(bot.keys.keys()) + list(bot.mouse.keys())
     response = f"Commands: {', '.join(cmds)}."
     await ctx.reply(response)
 
+@bot.command(name="drop")
+async def drop_all(ctx: commands.Context):
+    j = {
+        "action": "drop",
+        "query": " ".join(ctx.message.content.split()[1:])
+    }
+    await runelite_ws.send(json.dumps(j))
+
+@bot.command(name="npc")
+async def click_npc(ctx: commands.Context):
+    j = {
+        "action": "npc",
+        "query": " ".join(ctx.message.content.split()[1:])
+    }
+    await runelite_ws.send(json.dumps(j))
+
+@runelite_ws.event(name="drop")
+async def drop_rcv(data):
+    data = data["response"]
+    await bot.send_input("shift", True)
+    for i in range(len(data)):
+        clicky(data[i]["x"] + random.randint(-3, 3), data[i]["y"] + random.randint(-3, 3), steady=True)
+    await bot.send_input("shift", False)
+
+@runelite_ws.event(name="npc")
+async def npc_rcv(data):
+    # Remove any trailing zeros (if present)
+    x = [coord for coord in data["response"]["x"] if coord != 0]
+    y = [coord for coord in data["response"]["y"] if coord != 0]
+    centroid_x = sum(x) / len(x)
+    centroid_y = sum(y) / len(y)
+    r = random.uniform(0.5, 1.25)
+    clicky(centroid_x, centroid_y)
+    print("Centroid coordinates: ({}, {})".format(int(centroid_x), int(centroid_y)))
+
 async def kill_script():
     # I dont like this solution
-    '''    heat.stop()
-    await bot.close()'''
     os._exit(0)
 
 def on_hotkey_press():
