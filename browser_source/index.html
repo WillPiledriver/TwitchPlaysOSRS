@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Visible Dots</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1920px; /* Set to 1920 pixels */
+      height: 1080px; /* Set to 1080 pixels */
+      z-index: -1;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    // Function to resize canvas to match the window size
+    function resizeCanvas() {
+      const canvas = document.getElementById('canvas');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    // Attach an event listener to the window to resize the canvas when the window size changes
+    window.addEventListener('resize', resizeCanvas);
+
+    // Call the resize function to initially set the canvas size
+    resizeCanvas();
+
+    // Rest of the JavaScript code remains the same
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const jsonDataUrl = 'coords.json';
+    const updateInterval = 250; 
+
+    // Function to draw dots on the canvas
+    function drawDots(coords) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const id in coords) {
+        const { coords: [x, y] } = coords[id];
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = 'red';
+        ctx.fill();
+        ctx.closePath();
+      }
+    }
+
+    // Function to fetch JSON data and update the canvas
+    async function updateCanvas() {
+      try {
+        const response = await fetch(jsonDataUrl);
+        const coords = await response.json();
+        drawDots(coords);
+      } catch (error) {
+        console.error('Error fetching JSON data:', error);
+      }
+    }
+
+    // Initial update
+    updateCanvas();
+
+    // Periodically update the canvas
+    setInterval(updateCanvas, updateInterval);
+  </script>
+</body>
+</html>
