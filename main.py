@@ -1,5 +1,6 @@
 from TwitchPlays import *
 from RunelitePlugin import RunelitePlugin as rp
+from OBSWebsocketManager import OBSWebsocketManager as obs_mgr
 from dotenv import load_dotenv
 import os
 import threading
@@ -12,24 +13,24 @@ import cv2
 import json
 import pygetwindow as gw
 import math
+import aiofiles
 
 
-# TODO: viewport/scale calculations for accurate clicking
 runelite_ws_url = "ws://localhost:8085"
 runelite_ws = rp(runelite_ws_url)
 sio = socketio.AsyncClient()
-
+obs_ws = obs_mgr(password=os.getenv("OBS_PASS"))
 
 # Set the LOKY_MAX_CPU_COUNT environment variable
 os.environ['LOKY_MAX_CPU_COUNT'] = '4'
 
 
-image_path = "open_1920.png"
-click_cooldown = 2.5
+image_path = "osrs negative.png"
+click_cooldown = 5
 channel = "thepiledriver"
 heat_map = True
 command_chance = 1.0
-command_cooldown = 0
+command_cooldown = 5
 channel_id = "23728793"
 block_mouse = False
 
@@ -42,12 +43,27 @@ auth_list = list()
 x_coordinates = np.array([])
 y_coordinates = np.array([])
 
-window_y_offset = 23
+y_offset = 23
+x_offset = 0
+viewport_width = 0
+viewport_height = 0
+
+
 def get_window(partial_title):
     for window in gw.getWindowsWithTitle(partial_title):
         if partial_title.lower() in window.title.lower():
             return window
     return None
+
+async def write_json(file_name, data):
+    try:
+        # Open the file in write mode and use "async with" from aiofiles
+        async with aiofiles.open(file_name, 'w') as file:
+            # Dump the JSON data into the file
+            await file.write(json.dumps(data))
+    except Exception as e:
+        print(f'Error writing file: {e}')
+
 
 @sio.event
 async def connect():
@@ -65,7 +81,7 @@ async def leftClick(data):
     '''if data["opaque_id"] in click_dict:
         if click_dict[data["opaque_id"]]["time"] + click_cooldown > data["event_time"]:
             return'''
-    
+    print(data["x"], data["y"])
     x, y = int(data["x"] * size_x), int(data["y"] * size_y)
     if not mask[y, x].any():
         click_dict[data["opaque_id"]] = {
@@ -73,6 +89,7 @@ async def leftClick(data):
             "button": "left",
             "coords": (x, y)
         }
+    await write_json('./browser_source/coords.json', click_dict)
 
 @sio.event
 async def rightClick(data):
@@ -89,6 +106,7 @@ async def rightClick(data):
             "button": "right",
             "coords": (x, y)
         }
+    await write_json('./browser_source/coords.json', click_dict)
 
 @sio.event
 async def init(data):
@@ -158,13 +176,11 @@ async def mouse_loop():
     most_clicked_key = max(click_counts, key=click_counts.get)
 
     # Human-like mouse movement and click
-    # TODO: scale x, y to window size
     x, y = (round(center[0]), round(center[1]))
     print("Center coordinates:", x, y)
-    if mask[y, x].any():
-        return
+    
     click_dict = dict()
-    await clicky(x, y, most_clicked_key)
+    await clicky(x, y - y_offset, most_clicked_key)
 
 def most_common_action_query_pair(cmd_dict):
     action_query_count = {}
@@ -190,6 +206,7 @@ async def cmd_loop():
     print(j)
     await runelite_ws.send(json.dumps(j))
     cmd_dict = dict()
+    await update_obs_cmd()
        
 # Load the PNG image
 image = cv2.imread(image_path)
@@ -278,19 +295,26 @@ async def clicky(x, y, button="left", steady=False):
     distance = math.sqrt((x - pos[0])**2 + (y - pos[1])**2)
     fraction = distance / 1100
     r = max(random.uniform(0.5, 1) * fraction, random.uniform(0.05, 0.17))
+    x = int(x) + offsets[0] + x_offset
+    y = int(y) + offsets[1] + y_offset
+    print(x, y)
+    # Prevent bad clicks
+    if not (0 <= x <= 1919) or not (0 <= y <= 1079):
+        return
+    if mask[y, x].any():
+        return
     
     cmd = [
         "python",
         "human_mouse.py",
-        str(int(x) + offsets[0]),
-        str(int(y) + offsets[1] + window_y_offset),
+        str(x),
+        str(y),
         str(r),
         button,
         str(int(steady))
     ]
     while block_mouse:
         await asyncio.sleep(0.1)
-        print("blocking mouse")
     block_mouse = True
     process = await asyncio.create_subprocess_exec(*cmd)
     await process.wait()  # Wait for the subprocess to finish
@@ -301,6 +325,18 @@ async def help_cmd(ctx: commands.Context):
     cmds = [f"!{cmd}" for cmd in list(bot.commands.keys())] + list(bot.cmds.keys()) + list(bot.keys.keys()) + list(bot.mouse.keys())
     response = f"Commands: {', '.join(cmds)}."
     await ctx.reply(response)
+
+async def update_obs_cmd():
+    if len(cmd_dict) > 0:
+        most_common = most_common_action_query_pair(cmd_dict)
+        await obs_ws.change_text_source(source="cmd_text", text="Next: !" + " ".join(most_common.values())[:25])
+    else:
+        await obs_ws.change_text_source(source="cmd_text", text="Next:")
+
+@bot.command(name="goal")
+async def goal_cmd(ctx: commands.Context):
+    if ctx.author.is_mod or ctx.author.is_broadcaster:
+        await obs_ws.change_text_source(source="goal", text=("Goal: " + " ".join(ctx.message.content.split()[1:])))
 
 @bot.command(name="drop")
 async def drop_all(ctx: commands.Context):
@@ -319,16 +355,18 @@ async def drop_all(ctx: commands.Context):
         "query": q
     }
     cmd_dict[ctx.message.author] = j
-    # await runelite_ws.send(json.dumps(j))
+    await update_obs_cmd()
+    
 
 @bot.command(name="loot")
-async def tile(ctx: commands.Context):
+async def loot(ctx: commands.Context):
     global cmd_dict
     j = {
         "action": "loot",
         "query": " ".join(ctx.message.content.split()[1:])
     }
     cmd_dict[ctx.message.author] = j
+    await update_obs_cmd()
 
 @bot.command(name="npc")
 async def click_npc(ctx: commands.Context):
@@ -338,7 +376,7 @@ async def click_npc(ctx: commands.Context):
         "query": " ".join(ctx.message.content.split()[1:])
     }
     cmd_dict[ctx.message.author] = j
-    # await runelite_ws.send(json.dumps(j))
+    await update_obs_cmd()
 
 @bot.command(name="tile")
 async def tile(ctx: commands.Context):
@@ -348,7 +386,16 @@ async def tile(ctx: commands.Context):
         "query": " ".join(ctx.message.content.split()[1:])
     }
     cmd_dict[ctx.message.author] = j
-    # await runelite_ws.send(json.dumps(j)) 
+    await update_obs_cmd() 
+
+@runelite_ws.event(name="heartbeat")
+async def heartbeat(data):
+    global x_offset, y_offset, viewport_width, viewport_height
+    data = data["response"]
+    w = get_window("runelite")
+    xd, yd = (w.width, w.height)
+    viewport_width, viewport_height = data["viewportWidth"], data["viewportHeight"]
+    # x_offset, y_offset = xd - viewport_width, yd - viewport_height
 
 @runelite_ws.event(name="tile")
 async def tile_rcv(data):
@@ -362,7 +409,7 @@ async def tile_rcv(data):
         print("Centroid coordinates: ({}, {})".format(int(centroid_x), int(centroid_y)))
 
 @runelite_ws.event(name="loot")
-async def tile_rcv(data):
+async def loot_rcv(data):
     data = data["response"]
     print(data)
     x = [coord for coord in data["x"] if coord != 0]
@@ -372,7 +419,6 @@ async def tile_rcv(data):
         centroid_y = sum(y) / len(y)
         await clicky(centroid_x, centroid_y)
         print("Centroid coordinates: ({}, {})".format(int(centroid_x), int(centroid_y)))
-
 
 @runelite_ws.event(name="drop")
 async def drop_rcv(data):
@@ -394,6 +440,30 @@ async def npc_rcv(data):
     centroid_y = sum(y) / len(y)
     await clicky(centroid_x, centroid_y)
     print("Centroid coordinates: ({}, {})".format(int(centroid_x), int(centroid_y)))
+
+@runelite_ws.event(name="login")
+async def login(data):
+    global block_mouse
+    block_mouse = True
+    if data["response"] == "ready":
+        response = {
+            "action": "login",
+            "query": "login",
+            "username": os.getenv("OSRS_USER"),
+            "password": os.getenv("OSRS_PASS")
+        }
+        print("Logging in.")
+
+        await runelite_ws.send(json.dumps(response))
+        await asyncio.sleep(0.5)
+        await bot.send_input("enter", random.uniform(0.1, 0.2))
+        await asyncio.sleep(0.5)
+        await bot.send_input("enter", random.uniform(0.1, 0.2))
+    elif data["response"] == "logging in":
+        print("Logging in.")
+    elif data["response"] == "logged in":
+        print("Logged in.")
+        block_mouse = False
 
 async def kill_script():
     # I dont like this solution
