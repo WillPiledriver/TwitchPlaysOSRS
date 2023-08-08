@@ -14,6 +14,7 @@ class Bot(commands.Bot):
         self.user_dict = dict()
         self.chance = 1.0
         self.cooldown = 0
+        self.rcv_message = None
 
     async def event_ready(self):
         # We are logged in and ready to chat and use commands...
@@ -23,6 +24,7 @@ class Bot(commands.Bot):
         if ctx.echo:
             return
         command = ctx.content.lower()
+        print(command)
         
         if command in self.mouse:
             if ctx.author.id not in self.user_dict:
@@ -71,7 +73,12 @@ class Bot(commands.Bot):
                 return
             await self.cmds[command](ctx)
             return
+        ctx_content_list = ctx.content.split()
+        ctx_content_list[0] = ctx_content_list[0].lower()
+        ctx.content = " ".join(ctx_content_list)
+
         await self.handle_commands(ctx)
+        await self.rcv_message(ctx)
 
     async def mouse_event(self, coords: tuple, click: int, ctx: commands.Context):
         pydirectinput.move(coords[0], coords[1])
@@ -82,7 +89,6 @@ class Bot(commands.Bot):
             pydirectinput.mouseUp(button=buttons[click])
 
     async def send_input(self, inp, ms):
-        print(inp, ms)
         if not isinstance(ms, bool):
             pydirectinput.keyDown(inp)
             await asyncio.sleep(ms/1000)
@@ -101,6 +107,33 @@ class Bot(commands.Bot):
     async def task_keys(self, keys, ctx: commands.Context):
         tasks = [self.send_input(key[0], key[1]() if callable(key[1]) else key[1]) for key in keys]
         await asyncio.gather(*tasks)
+
+    async def type_human(self, inp):
+        allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}\\|;:'\",.?/`~ ")
+        shift_keys = set("!@#$%^&*()_+{}|:\"?~QWERTYUIOPASDFGHJKLZXCVBNM")
+        inp = ''.join(char for char in inp if char in allowed_chars)
+        count = 0
+        shift = False
+        for c in inp:
+            if c in shift_keys:
+                shift = True
+                pydirectinput.keyDown("shift")
+                await asyncio.sleep(random.uniform(0.02, 0.04))
+            pydirectinput.keyDown(c)
+            await asyncio.sleep(random.uniform(0.03, 0.05))
+            pydirectinput.keyUp(c)
+            await asyncio.sleep(random.uniform(0.05, 0.075))
+            print(c, count, len(inp))
+            if len(inp) == count + 1:
+                if shift:
+                    shift = False
+                    pydirectinput.keyUp("shift")
+                return
+            if inp[count + 1] not in shift_keys:
+                shift = False
+                pydirectinput.keyUp("shift")
+                await asyncio.sleep(random.uniform(0.01, 0.025))
+            count += 1
 
     @commands.command()
     async def hello(self, ctx: commands.Context):
