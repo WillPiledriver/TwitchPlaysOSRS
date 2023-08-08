@@ -17,7 +17,7 @@ if len(sys.argv) >= 5:
         # Create a HumanCurve object with reduced randomness
         pos = pyautogui.position()
         distance = math.sqrt((x - pos[0])**2 + (y - pos[1])**2)
-        hc.move((x, y), duration, humanCurve=HumanCurve(pos, (x, y), distortionStdev=0.1, distortionMean=0.1, distortionFrequency=0.1, targetPoints=min(100, int(distance / 2)), offsetBoundaryX=5, offsetBoundaryY=5))
+        hc.move((x, y), duration, humanCurve=HumanCurve(pos, (x, y), distortionStdev=0.1, distortionMean=0.1, distortionFrequency=0.1, targetPoints=min(100, max(int(distance / 2), 2)), offsetBoundaryX=5, offsetBoundaryY=5))
     else:
         # move the mouse to position (x, y) on the screen in the specified duration with default randomness
         hc.move((x, y), duration)

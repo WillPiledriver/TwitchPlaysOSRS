@@ -14,25 +14,29 @@ import json
 import pygetwindow as gw
 import math
 import aiofiles
+import logging
+
 
 
 runelite_ws_url = "ws://localhost:8085"
 runelite_ws = rp(runelite_ws_url)
 sio = socketio.AsyncClient()
 obs_ws = obs_mgr(password=os.getenv("OBS_PASS"))
+logging.getLogger("simpleobsws").setLevel(logging.FATAL)
 
 # Set the LOKY_MAX_CPU_COUNT environment variable
 os.environ['LOKY_MAX_CPU_COUNT'] = '4'
 
 
 image_path = "osrs negative.png"
-click_cooldown = 5
+click_cooldown = .1
 channel = "thepiledriver"
 heat_map = True
 command_chance = 1.0
-command_cooldown = 5
-channel_id = "23728793"
+command_cooldown = .5
+channel_id = "23728793" # 934681057 23728793
 block_mouse = False
+block_type = False
 
 
 load_dotenv()
@@ -47,7 +51,9 @@ y_offset = 23
 x_offset = 0
 viewport_width = 0
 viewport_height = 0
-
+actions = list()
+tug_of_war = 0
+is_chaos = True
 
 def get_window(partial_title):
     for window in gw.getWindowsWithTitle(partial_title):
@@ -67,6 +73,7 @@ async def write_json(file_name, data):
 
 @sio.event
 async def connect():
+    await obs_ws.change_text_source("tug", "tug: " + str(tug_of_war))
     print("I'm connected!")
     await sio.emit("init", channel_id)
 
@@ -127,14 +134,20 @@ async def run_socketio():
     await sio.wait()
 
 async def interaction_loop():
-    global x_coordinates, y_coordinates, click_dict, block_mouse, cmd_dict
+    global click_dict, cmd_dict
     while True:
-        await asyncio.sleep(click_cooldown / 2)
-        if len(click_dict) + len(cmd_dict) == 0:
-            continue
-        await mouse_loop()
-        await asyncio.sleep(click_cooldown / 2)
-        await cmd_loop()
+        if tug_of_war <= 0:
+            cooldown = 0.1
+        else:
+            cooldown = (tug_of_war * 100 + 1000) / 1000
+        await asyncio.sleep(cooldown / 2)
+        if len(click_dict) > 0:
+            await mouse_loop()
+        await asyncio.sleep(cooldown / 2)
+        if len(cmd_dict) > 0:
+            await cmd_loop()
+
+
 
 
 async def mouse_loop():
@@ -180,7 +193,7 @@ async def mouse_loop():
     print("Center coordinates:", x, y)
     
     click_dict = dict()
-    await clicky(x, y - y_offset, most_clicked_key)
+    await clicky(x, y - y_offset, most_clicked_key, steady=True)
 
 def most_common_action_query_pair(cmd_dict):
     action_query_count = {}
@@ -235,7 +248,8 @@ bot.keys = {
     "l": [("left", lambda: random.randint(750, 1000))],
     "r": [("right", lambda: random.randint(750, 1000))],
     "u": [("up", lambda: random.randint(200, 350))],
-    "d": [("down", lambda: random.randint(200, 350))]
+    "d": [("down", lambda: random.randint(200, 350))],
+    "space": [(" ", lambda: random.randint(100, 250))]
 }
 
 """
@@ -283,20 +297,36 @@ bot.keys = {
             "mm": [((0, 0), 3)], # middle mouse button
             "lu": [((-100, 0), 1), ((0,-100), 2)], # left up, mouse 1 and 2
 }'''
+
+async def message_hack(ctx: commands.Context):
+    for m in [f"!{cmd}" for cmd in list(bot.commands.keys())] + list(bot.cmds.keys()) + list(bot.keys.keys()) + list(bot.mouse.keys()):
+        if ctx.content.lower().split()[0] == m.lower():
+            return
+    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}\\|;:'\",.<>?/`~ ")
+
+    # Filter the input string to keep only the allowed characters
+    m =  ''.join(char for char in ctx.content[:120] if char in allowed_chars)
+    j = {
+        "action": "message",
+        "query": "message",
+        "user": ctx.author.name,
+        "msg": m
+    }
+    await runelite_ws.send(json.dumps(j))
+
 bot.chance = command_chance
 bot.cooldown = command_cooldown
+bot.rcv_message = message_hack
 # bot.cmd["!help"] = help_cmd
 
 async def clicky(x, y, button="left", steady=False):
     global block_mouse
-    window = get_window("runelite")
-    offsets = window.topleft
     pos = pydirectinput.position()
     distance = math.sqrt((x - pos[0])**2 + (y - pos[1])**2)
     fraction = distance / 1100
     r = max(random.uniform(0.5, 1) * fraction, random.uniform(0.05, 0.17))
-    x = int(x) + offsets[0] + x_offset
-    y = int(y) + offsets[1] + y_offset
+    x = int(x) + x_offset
+    y = int(y) + y_offset
     print(x, y)
     # Prevent bad clicks
     if not (0 <= x <= 1919) or not (0 <= y <= 1079):
@@ -314,11 +344,36 @@ async def clicky(x, y, button="left", steady=False):
         str(int(steady))
     ]
     while block_mouse:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.2)
     block_mouse = True
     process = await asyncio.create_subprocess_exec(*cmd)
     await process.wait()  # Wait for the subprocess to finish
     block_mouse = False
+
+@bot.command(name="chaos")
+async def chaos(ctx: commands.Context):
+    global tug_of_war, is_chaos
+    if ctx.author.is_mod:
+        tug_of_war = max(tug_of_war -  10, -50)
+    else:
+        tug_of_war = max(tug_of_war -  1, -50)
+    if not is_chaos and tug_of_war <= 0:
+        is_chaos = True
+        await ctx.reply("CHAOS!!!!!!!")
+    await obs_ws.change_text_source("tug", "tug: " + str(tug_of_war))
+
+
+@bot.command(name="order")
+async def order(ctx: commands.Context):
+    global tug_of_war, is_chaos
+    if ctx.author.is_mod:
+        tug_of_war = min(tug_of_war +  10, 50)
+    else:
+        tug_of_war = min(tug_of_war +  1, 50)
+    if is_chaos and tug_of_war > 0:
+        is_chaos = False
+        await ctx.reply("Order.")
+    await obs_ws.change_text_source("tug", "tug: " + str(tug_of_war))
 
 @bot.command(name="help")
 async def help_cmd(ctx: commands.Context):
@@ -326,12 +381,25 @@ async def help_cmd(ctx: commands.Context):
     response = f"Commands: {', '.join(cmds)}."
     await ctx.reply(response)
 
+@bot.command(name="space")
+async def space(ctx: commands.Context):
+    for i in range(10):
+        await bot.send_input(" ", random.uniform(75, 150))
+        await asyncio.sleep(1)
+
+
 async def update_obs_cmd():
+    global actions
     if len(cmd_dict) > 0:
         most_common = most_common_action_query_pair(cmd_dict)
-        await obs_ws.change_text_source(source="cmd_text", text="Next: !" + " ".join(most_common.values())[:25])
+        actions.insert(0, "!" + " ".join(most_common.values())[:25])
+        actions = actions[:5]
+        await write_json("browser_source/actions.json", actions)
+        # await obs_ws.change_text_source(source="cmd_text", text="Next: !" + " ".join(most_common.values())[:25])
     else:
-        await obs_ws.change_text_source(source="cmd_text", text="Next:")
+        # await obs_ws.change_text_source(source="cmd_text", text="Next:")
+        pass
+    
 
 @bot.command(name="goal")
 async def goal_cmd(ctx: commands.Context):
@@ -340,7 +408,7 @@ async def goal_cmd(ctx: commands.Context):
 
 @bot.command(name="drop")
 async def drop_all(ctx: commands.Context):
-    legal = ["logs", "shrimp", "trout", "salmon", "bones", "ore"]
+    legal = ["essence", "logs", "shrimp", "trout", "salmon", "bones", "ore", "burn", "herring"]
     global cmd_dict
     q = " ".join(ctx.message.content.split()[1:])
     is_legal = False
@@ -360,6 +428,7 @@ async def drop_all(ctx: commands.Context):
 
 @bot.command(name="loot")
 async def loot(ctx: commands.Context):
+    print("loot send")
     global cmd_dict
     j = {
         "action": "loot",
@@ -387,6 +456,16 @@ async def tile(ctx: commands.Context):
     }
     cmd_dict[ctx.message.author] = j
     await update_obs_cmd() 
+
+@bot.command(name="type")
+async def type_cmd(ctx: commands.Context):
+    global block_type
+    while block_type:
+        await asyncio.sleep(0.5)
+    
+    block_type = True
+    await bot.type_human(" ".join(ctx.message.content.split()[1:])[:120])
+    block_type = False
 
 @runelite_ws.event(name="heartbeat")
 async def heartbeat(data):
@@ -444,7 +523,6 @@ async def npc_rcv(data):
 @runelite_ws.event(name="login")
 async def login(data):
     global block_mouse
-    block_mouse = True
     if data["response"] == "ready":
         response = {
             "action": "login",
@@ -453,7 +531,9 @@ async def login(data):
             "password": os.getenv("OSRS_PASS")
         }
         print("Logging in.")
-
+        block_mouse = False
+        await clicky(962, 336 - y_offset, steady=True)
+        block_mouse = True
         await runelite_ws.send(json.dumps(response))
         await asyncio.sleep(0.5)
         await bot.send_input("enter", random.uniform(0.1, 0.2))
@@ -464,6 +544,7 @@ async def login(data):
     elif data["response"] == "logged in":
         print("Logged in.")
         block_mouse = False
+        await clicky(964, 366 - y_offset, steady=True)
 
 async def kill_script():
     # I dont like this solution
