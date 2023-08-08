@@ -18,10 +18,40 @@
       height: 1080px; /* Set to 1080 pixels */
       z-index: -1;
     }
+    @font-face {
+      font-family: 'runescape';
+      src: url('fonts/runescape.otf') format('opentype');
+    }
+    #actionContainer {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      padding: 10px;
+      background-color: rgba(0, 0, 0, 0.35);
+      border-radius: 10px;
+      font-family: 'runescape', sans-serif;
+      color: #ffff00;
+      width: 300px;
+    }
+    .actionItem {
+      display: block;
+      text-align: right;
+      margin-bottom: 5px;
+      overflow: hidden;
+    }
+    .actionText {
+      display: inline-block;
+      animation: bumpUpAnimation 1s ease;
+    }
+    @keyframes bumpUpAnimation {
+      from { transform: translateY(-100%); opacity: 0; }
+      to { transform: translateY(0%); opacity: 1; }
+    }
   </style>
 </head>
 <body>
   <canvas id="canvas"></canvas>
+  <div id="actionContainer"></div>
   <script>
     // Function to resize canvas to match the window size
     function resizeCanvas() {
@@ -40,7 +70,10 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const jsonDataUrl = 'coords.json';
-    const updateInterval = 250; 
+    const updateInterval = 250;
+    const actionContainer = document.getElementById('actionContainer');
+    let actions = [];
+    let previousAction = null;
 
     // Function to draw dots on the canvas
     function drawDots(coords) {
@@ -58,6 +91,24 @@
       }
     }
 
+	function updateActionList(newAction) {
+	  actions.push(newAction);
+	  if (actions.length > 5) {
+		actions.shift();
+	  }
+
+	  // Update only the newly added action item
+	  const actionItem = document.createElement('div');
+	  actionItem.className = 'actionItem';
+	  const actionText = document.createElement('span');
+	  actionText.textContent = newAction; // Use the new action here
+	  actionText.className = 'actionText';
+	  actionText.style.fontSize = `${32 - actions.length * 5}px`;
+	  actionItem.appendChild(actionText);
+	  actionContainer.appendChild(actionItem);
+
+	}
+
     // Function to fetch JSON data and update the canvas
     async function updateCanvas() {
       try {
@@ -69,11 +120,81 @@
       }
     }
 
-    // Initial update
-    updateCanvas();
+    // Function to fetch actions.json and update the action list
+    async function updateActions() {
+      try {
+        const response = await fetch('actions.json');
+        const actionsArray = await response.json();
+        actions = actionsArray.map(action => action.trim());
+		if (JSON.stringify(actionsArray) != JSON.stringify(previousAction)) {
+			// Clear the actionContainer before re-rendering the action list
+			actionContainer.innerHTML = '';
+			previousAction = actionsArray;
+			// Render the action list with content from the JSON file
+			actions.forEach((action, index) => {
+			  const actionItem = document.createElement('div');
+			  actionItem.className = 'actionItem';
+			  const actionText = document.createElement('span');
+			  actionText.textContent = action;
+			  actionText.className = 'actionText';
+			  actionText.style.fontSize = `${32 - index * 5}px`;
+			  actionItem.appendChild(actionText);
+			  actionContainer.appendChild(actionItem);
+			});
+		}
+      } catch (error) {
+        console.error('Error fetching actions:', error);
+      }
+    }
+/*    async function updateActions() {
+      try {
+        const response = await fetch('actions.json');
+        const actionsArray = await response.json();
+        actions = actionsArray.map(action => action.trim());
+        if (JSON.stringify(actionsArray) != JSON.stringify(previousAction)) { // Only update the action list if it has been updated
+          previousAction = actionsArray; // Reset the flag after updating the action list
+          console.log(previousAction);
+		  console.log(actionsArray);
+		  updateActionList(actions[actions.length - 1]);
+        }
+      } catch (error) {
+        console.error('Error fetching actions:', error);
+      }
+    }*/
 
-    // Periodically update the canvas
-    setInterval(updateCanvas, updateInterval);
+
+    // Function to fetch actions.json and initialize the action list
+    async function initializeActionList() {
+      try {
+        const response = await fetch('actions.json');
+        const actionsArray = await response.json();
+		previousAction = actionsArray;
+        actions = actionsArray.map(action => action.trim());
+        actions.slice().forEach((action, index) => {
+          const actionItem = document.createElement('div');
+          actionItem.className = 'actionItem';
+          const actionText = document.createElement('span');
+          actionText.textContent = action;
+          actionText.className = 'actionText';
+          actionText.style.fontSize = `${32 - index * 5}px`;
+          actionItem.appendChild(actionText);
+          actionContainer.appendChild(actionItem);
+        });
+      } catch (error) {
+        console.error('Error fetching actions:', error);
+      }
+    }
+
+    // Initial updates
+    updateCanvas();
+    updateActions();
+
+    // Periodically update the canvas and actions list
+    setInterval(async () => {
+      await updateCanvas();
+	  await updateActions();
+    }, updateInterval);
+
   </script>
 </body>
 </html>
