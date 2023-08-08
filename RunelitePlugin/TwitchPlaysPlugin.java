@@ -426,6 +426,7 @@ public class TwitchPlaysPlugin extends Plugin {
         try {
             // Get the player's local location
             LocalPoint playerLocalLocation = client.getLocalPlayer().getLocalLocation();
+            List<String> npcNames = new ArrayList<>();
 
             // Initialize variables to track the closest NPC and its distance to the player
             NPC closestNPC = null;
@@ -441,11 +442,11 @@ public class TwitchPlaysPlugin extends Plugin {
             // Loop through the NPCs and find the NPC with the given partial name closest to the player
             for (NPC npc : npcs) {
                 NPCComposition npcComposition = npc.getComposition();
-                if (npcComposition != null) {
-                    if (npcComposition.isVisible()) {
-                        // Check if the NPC name contains the partial name
-                        String npcName = npcComposition.getName().toLowerCase();
 
+                if (npcComposition != null) {
+                    if (!npcComposition.getName().equals("null")) {
+                        String npcName = npcComposition.getName().toLowerCase();
+                        npcNames.add(npcName);
                         if (npcName.contains(partialName.toLowerCase())) {
                             // Calculate the distance between the player and the NPC
                             LocalPoint npcLocalLocation = npc.getLocalLocation();
@@ -461,6 +462,7 @@ public class TwitchPlaysPlugin extends Plugin {
                 }
             }
 
+            System.out.println(String.join(", ", npcNames));
             return closestNPC;
         } catch (Exception e) {
             e.printStackTrace();
@@ -475,7 +477,7 @@ public class TwitchPlaysPlugin extends Plugin {
         } else {
             Shape cb = Perspective.getClickbox(client, npc.getModel(), npc.getCurrentOrientation(), npc.getLocalLocation().getX(), npc.getLocalLocation().getY(), Perspective.getTileHeight(client, npc.getLocalLocation(), client.getPlane()));
             Shape ch = npc.getConvexHull();
-            return cb;
+            return extractSimplePolygon(cb);
         }
     }
 
@@ -510,7 +512,7 @@ public class TwitchPlaysPlugin extends Plugin {
         responseJson.addProperty("action", action);
         responseJson.add("response", new Gson().toJsonTree(query));
         String response = responseJson.toString();
-        System.out.println(response);
+        // System.out.println(response);
         return new TextWebSocketFrame(response);
     }
 
@@ -577,6 +579,11 @@ public class TwitchPlaysPlugin extends Plugin {
                         client.setUsername(jsonObject.get("username").getAsString());
                         client.setPassword(jsonObject.get("password").getAsString());
                         break;
+
+                    case "message":
+                        String user = jsonObject.get("user").getAsString();
+                        String message = jsonObject.get("msg").getAsString();
+                        client.addChatMessage(ChatMessageType.CLAN_CHAT, user, message, "TWITCH");
 
                     default:
                         // Handle unknown actions or errors here
